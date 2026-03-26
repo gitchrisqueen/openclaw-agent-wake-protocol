@@ -93,8 +93,49 @@ async function runAgentLifecycle(
   const timestamp = new Date().toISOString();
   const found = discovered.find((a) => a.agent_id === lifeAgentId);
 
-  // ── Not registered ────────────────────────────────────────────────────────
-  if (!found || !found.registered) {
+  // ── Not in shared-path discovery — try direct wake (e.g. quin-ea-v1) ─────
+  if (!found) {
+    logger.info(
+      `[agent-wake] ${lifeAgentId}: not in discover_agents — trying direct wake`
+    );
+    const directWake = await mcporter(
+      ["call", "life-gateway.wake", `agent_id=${lifeAgentId}`],
+      timeoutMs
+    );
+    if (
+      directWake.startsWith("ERROR") ||
+      directWake.toLowerCase().includes("agent not found")
+    ) {
+      logger.warn(
+        `[agent-wake] ${lifeAgentId}: not found in LIFE gateway — will prompt on boot`
+      );
+      wakeResults.set(lifeAgentId, {
+        agentId: lifeAgentId,
+        status: "not_registered",
+        message: `Agent ${lifeAgentId} is not in the LIFE gateway registry.`,
+        timestamp,
+      });
+    } else {
+      const degraded =
+        directWake.toLowerCase().includes("missing") ||
+        directWake.toLowerCase().includes("degraded") ||
+        directWake.toLowerCase().includes("error");
+      wakeResults.set(lifeAgentId, {
+        agentId: lifeAgentId,
+        status: degraded ? "degraded" : "ok",
+        message: `Wake complete for ${lifeAgentId}`,
+        wakeOutput: directWake,
+        timestamp,
+      });
+      logger.info(
+        `[agent-wake] ${lifeAgentId}: ${degraded ? "DEGRADED" : "OK"} (direct wake)`
+      );
+    }
+    return;
+  }
+
+  // ── Discovered but not yet registered ────────────────────────────────────
+  if (!found.registered) {
     logger.warn(
       `[agent-wake] ${lifeAgentId}: not registered in LIFE gateway — will prompt on boot`
     );
