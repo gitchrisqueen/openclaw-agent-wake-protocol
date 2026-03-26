@@ -1,7 +1,10 @@
 /**
- * openclaw-quin-wake-protocol — OpenClaw Extension
+ * openclaw-agent-wake-protocol — OpenClaw Extension
  *
- * Manages the full LIFE gateway lifecycle for all OpenClaw agents:
+ * General-purpose LIFE gateway lifecycle manager for any OpenClaw multi-agent system.
+ * Works with any agent names and any LIFE agent_id conventions — fully driven by config.
+ *
+ * Manages the full lifecycle for every agent in your system:
  *
  *   1. NOT REGISTERED  → Injects registration + init instructions into agent context
  *   2. GENESIS PENDING → Injects the Genesis interview into agent context so the agent
@@ -55,10 +58,15 @@ interface DiscoveredAgent {
 interface PluginConfig {
   /**
    * Map of OpenClaw agent name → LIFE agent_id.
-   * The "main" → "quin-ea-v1" default is always included.
-   * Override or extend here.
+   * Example: { "main": "my-agent-v1", "finance": "finance-agent-v1" }
+   * When not provided for a given agent name, falls back to the agentIdSuffix convention.
    */
   agentIdMap?: Record<string, string>;
+  /**
+   * Suffix appended when deriving a LIFE agent_id from an OpenClaw agent name.
+   * Default: "-v1"  →  agent name "finance" becomes "finance-v1"
+   */
+  agentIdSuffix?: string;
   /**
    * Only inject context for sessions matching this prefix.
    * Default: "agent:" (all agents). Set to "agent:main:" for main only.
@@ -195,7 +203,7 @@ async function runAgentLifecycle(
   // ── Not registered ────────────────────────────────────────────────────────
   if (!found || !found.registered) {
     logger.warn(
-      `[quin-wake] ${lifeAgentId}: not registered in LIFE gateway — will prompt on boot`
+      `[agent-wake] ${lifeAgentId}: not registered in LIFE gateway — will prompt on boot`
     );
     wakeResults.set(lifeAgentId, {
       agentId: lifeAgentId,
@@ -209,7 +217,7 @@ async function runAgentLifecycle(
   // ── Genesis pending ───────────────────────────────────────────────────────
   if (!found.genesis_completed) {
     logger.info(
-      `[quin-wake] ${lifeAgentId}: genesis pending — fetching interview instructions`
+      `[agent-wake] ${lifeAgentId}: genesis pending — fetching interview instructions`
     );
     const genesisRaw = await mcporter(
       ["call", "life-gateway.run_genesis_interview", `agent_id=${lifeAgentId}`],
@@ -226,7 +234,7 @@ async function runAgentLifecycle(
   }
 
   // ── Ready — run status then wake ─────────────────────────────────────────
-  logger.info(`[quin-wake] ${lifeAgentId}: running wake protocol`);
+  logger.info(`[agent-wake] ${lifeAgentId}: running wake protocol`);
 
   const wakeRaw = await mcporter(
     ["call", "life-gateway.wake", `agent_id=${lifeAgentId}`],
@@ -249,7 +257,7 @@ async function runAgentLifecycle(
   });
 
   logger.info(
-    `[quin-wake] ${lifeAgentId}: ${failed ? "FAILED" : degraded ? "DEGRADED" : "OK"}`
+    `[agent-wake] ${lifeAgentId}: ${failed ? "FAILED" : degraded ? "DEGRADED" : "OK"}`
   );
 }
 
@@ -260,22 +268,20 @@ export default function (api: any) {
   const timeoutMs = cfg.commandTimeoutMs ?? 20000;
   const sessionPrefix = cfg.sessionPrefix ?? "agent:";
 
-  const agentIdMap: Record<string, string> = {
-    main: "quin-ea-v1",
-    ...(cfg.agentIdMap ?? {}),
-  };
+  const agentIdMap: Record<string, string> = cfg.agentIdMap ?? {};
+  const agentIdSuffix = cfg.agentIdSuffix ?? "-v1";
 
   function resolveLifeId(openclawName: string): string {
-    return agentIdMap[openclawName] ?? `quin-${openclawName}-v1`;
+    return agentIdMap[openclawName] ?? `${openclawName}${agentIdSuffix}`;
   }
 
   // ── Service: discover and wake all agents at gateway startup ──────────────
   api.registerService({
-    id: "quin-wake-protocol",
+    id: "agent-wake-protocol",
 
     async start() {
       api.logger.info(
-        "[quin-wake] Gateway started — discovering LIFE agents..."
+        "[agent-wake] Gateway started — discovering LIFE agents..."
       );
 
       const discoveryRaw = await mcporter(
@@ -285,7 +291,7 @@ export default function (api: any) {
 
       if (discoveryRaw.startsWith("ERROR")) {
         api.logger.error(
-          `[quin-wake] discover_agents failed: ${discoveryRaw}`
+          `[agent-wake] discover_agents failed: ${discoveryRaw}`
         );
         // Store a failed result for every known agent so hook can degrade gracefully
         for (const lifeId of Object.values(agentIdMap)) {
@@ -300,7 +306,7 @@ export default function (api: any) {
       }
 
       const agents = parseDiscovery(discoveryRaw);
-      api.logger.info(`[quin-wake] Discovered ${agents.length} LIFE agents`);
+      api.logger.info(`[agent-wake] Discovered ${agents.length} LIFE agents`);
 
       // Run lifecycle for every agent in the id map + any extras discovered
       const allIds = new Set([
@@ -314,11 +320,11 @@ export default function (api: any) {
         )
       );
 
-      api.logger.info("[quin-wake] Boot protocol complete");
+      api.logger.info("[agent-wake] Boot protocol complete");
     },
 
     stop() {
-      api.logger.info("[quin-wake] Service stopping");
+      api.logger.info("[agent-wake] Service stopping");
     },
   });
 
@@ -347,7 +353,7 @@ export default function (api: any) {
     if (!inject) return;
 
     api.logger.info(
-      `[quin-wake] Injecting ${result.status} context for ${lifeId} (session: ${sessionKey})`
+      `[agent-wake] Injecting ${result.status} context for ${lifeId} (session: ${sessionKey})`
     );
 
     return { prependContext: formatContextBlock(result) };
@@ -418,7 +424,7 @@ export default function (api: any) {
       if (!agentId) {
         return { content: [{ type: "text", text: "agent_id is required" }], isError: true };
       }
-      api.logger.info(`[quin-wake] Manual lifecycle run requested for ${agentId}`);
+      api.logger.info(`[agent-wake] Manual lifecycle run requested for ${agentId}`);
       const discoveryRaw = await mcporter(
         ["call", "life-gateway.discover_agents"],
         timeoutMs
@@ -466,7 +472,7 @@ export default function (api: any) {
         return { content: [{ type: "text", text: "agent_id is required" }], isError: true };
       }
 
-      api.logger.info(`[quin-wake] Applying Genesis answers for ${agent_id}`);
+      api.logger.info(`[agent-wake] Applying Genesis answers for ${agent_id}`);
 
       const applyArgs = ["call", "life-gateway.apply_genesis_answers", `agent_id=${agent_id}`];
       if (answers_path) applyArgs.push(`answers_path=${answers_path}`);
@@ -481,7 +487,7 @@ export default function (api: any) {
       }
 
       // Now run the full wake since genesis is done
-      api.logger.info(`[quin-wake] Genesis applied — running wake for ${agent_id}`);
+      api.logger.info(`[agent-wake] Genesis applied — running wake for ${agent_id}`);
       const discoveryRaw = await mcporter(
         ["call", "life-gateway.discover_agents"],
         timeoutMs

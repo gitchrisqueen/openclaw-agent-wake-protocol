@@ -1,21 +1,26 @@
 {
-  "id": "quin-wake-protocol",
-  "name": "Quin Wake Protocol",
-  "description": "Full LIFE gateway lifecycle manager for OpenClaw agents. Handles agent registration, Genesis interview, and wake protocol at gateway startup. Injects system health and onboarding instructions into agent context automatically.",
+  "id": "agent-wake-protocol",
+  "name": "Agent Wake Protocol",
+  "description": "General-purpose LIFE gateway lifecycle manager for OpenClaw multi-agent systems. Handles agent registration, Genesis interview, and wake protocol for any agent configuration.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
       "agentIdMap": {
         "type": "object",
-        "description": "Map of OpenClaw agent names to LIFE agent_ids. The 'main' -> 'quin-ea-v1' default is always included.",
+        "description": "Map of OpenClaw agent names to LIFE agent_ids. Example: { \"main\": \"my-agent-v1\" }",
         "additionalProperties": { "type": "string" },
         "default": {}
+      },
+      "agentIdSuffix": {
+        "type": "string",
+        "default": "-v1",
+        "description": "Suffix used when deriving a LIFE agent_id from an OpenClaw agent name (e.g. 'finance' + '-v1' = 'finance-v1'). Override if your naming convention differs."
       },
       "sessionPrefix": {
         "type": "string",
         "default": "agent:",
-        "description": "Only inject context for session keys with this prefix. Use 'agent:main:' to target only the main agent."
+        "description": "Only inject context for session keys with this prefix. Narrow to 'agent:main:' to target a single agent."
       },
       "commandTimeoutMs": {
         "type": "number",

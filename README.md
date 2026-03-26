@@ -1,4 +1,4 @@
-# openclaw-quin-wake-protocol
+# openclaw-agent-wake-protocol
 
 An [OpenClaw](https://openclaw.ai) extension that manages the full **LIFE gateway lifecycle** for all agents in your multi-agent system.
 
@@ -23,7 +23,7 @@ Each agent's LIFE state is injected into its bootstrap session as a `<wake-proto
 
 ```
 OpenClaw Gateway
-  └── quin-wake-protocol (this extension)
+  └── agent-wake-protocol (this extension)
         ├── before_agent_start hook  → injects <wake-protocol-status> on first turn
         ├── registerService          → runs full lifecycle at gateway boot
         └── tools:
@@ -54,9 +54,9 @@ OpenClaw Gateway
 ### 1. Install the npm package
 
 ```bash
-npm install openclaw-quin-wake-protocol
+npm install openclaw-agent-wake-protocol
 # or
-pnpm add openclaw-quin-wake-protocol
+pnpm add openclaw-agent-wake-protocol
 ```
 
 ### 2. Set up the Python environment
@@ -64,9 +64,9 @@ pnpm add openclaw-quin-wake-protocol
 Run the included setup script once:
 
 ```bash
-./node_modules/openclaw-quin-wake-protocol/scripts/install-gateway.sh \
+./node_modules/openclaw-agent-wake-protocol/scripts/install-gateway.sh \
   ~/.openclaw/life/.venv \
-  ~/.openclaw/workspaces/quin/LIFE
+  ~/.openclaw/workspaces/<agent>/LIFE
 ```
 
 This creates a Python venv, installs `fastmcp`, and runs `setup.py` from your LIFE repo.
@@ -74,17 +74,17 @@ This creates a Python venv, installs `fastmcp`, and runs `setup.py` from your LI
 If you haven't cloned LIFE yet:
 
 ```bash
-git clone https://github.com/TeamSafeAI/LIFE ~/.openclaw/workspaces/quin/LIFE
+git clone https://github.com/TeamSafeAI/LIFE ~/.openclaw/workspaces/<agent>/LIFE
 ```
 
 ### 3. Copy the gateway server to your workspace
 
 ```bash
-cp -n node_modules/openclaw-quin-wake-protocol/gateway/server.py \
-      ~/.openclaw/workspaces/quin/life-gateway/server.py
+cp -n node_modules/openclaw-agent-wake-protocol/gateway/server.py \
+      ~/.openclaw/life-gateway/server.py
 
-cp -n node_modules/openclaw-quin-wake-protocol/gateway/genesis-questions.md \
-      ~/.openclaw/workspaces/quin/life-gateway/genesis-questions.md
+cp -n node_modules/openclaw-agent-wake-protocol/gateway/genesis-questions.md \
+      ~/.openclaw/life-gateway/genesis-questions.md
 ```
 
 > Use `-n` (no-clobber) to avoid overwriting a customized server.
@@ -92,8 +92,8 @@ cp -n node_modules/openclaw-quin-wake-protocol/gateway/genesis-questions.md \
 ### 4. Create your agents registry
 
 ```bash
-cp node_modules/openclaw-quin-wake-protocol/gateway/agents.json.template \
-   ~/.openclaw/workspaces/quin/life-gateway/agents.json
+cp node_modules/openclaw-agent-wake-protocol/gateway/agents.json.template \
+   ~/.openclaw/life-gateway/agents.json
 # Edit agents.json and add your agent entries
 ```
 
@@ -104,7 +104,7 @@ In your `openclaw.json`, add the life-gateway server to `openclaw-mcp-adapter`'s
 ```json
 {
   "plugins": {
-    "allow": ["openclaw-mcp-adapter", "quin-wake-protocol"],
+    "allow": ["openclaw-mcp-adapter", "agent-wake-protocol"],
     "entries": {
       "openclaw-mcp-adapter": {
         "enabled": true,
@@ -114,23 +114,23 @@ In your `openclaw.json`, add the life-gateway server to `openclaw-mcp-adapter`'s
               "name": "life-gateway",
               "type": "stdio",
               "command": "/home/YOUR_USER/.openclaw/life/.venv/bin/python",
-              "args": ["/home/YOUR_USER/.openclaw/workspaces/quin/life-gateway/server.py"],
+              "args": ["/home/YOUR_USER/.openclaw/life-gateway/server.py"],
               "env": {
-                "LIFE_GATEWAY_REGISTRY": "/home/YOUR_USER/.openclaw/workspaces/quin/life-gateway/agents.json",
+                "LIFE_GATEWAY_REGISTRY": "/home/YOUR_USER/.openclaw/life-gateway/agents.json",
                 "LIFE_CALL_TIMEOUT_SEC": "45"
               }
             }
           ]
         }
       },
-      "quin-wake-protocol": {
+      "agent-wake-protocol": {
         "enabled": true,
         "config": {
           "agentIdMap": {
-            "main": "quin-ea-v1",
-            "quin-finance": "quin-finance-v1",
-            "quin-platform": "quin-platform-v1",
-            "quin-research": "quin-research-v1"
+            "main": "my-main-agent-v1",
+            "finance": "finance-v1",
+            "platform": "platform-v1",
+            "research": "research-v1"
           }
         }
       }
@@ -152,9 +152,9 @@ systemctl --user restart openclaw-gateway.service
 For each new C-level agent, run the included script:
 
 ```bash
-./node_modules/openclaw-quin-wake-protocol/scripts/onboard-agent.sh finance
-./node_modules/openclaw-quin-wake-protocol/scripts/onboard-agent.sh platform
-./node_modules/openclaw-quin-wake-protocol/scripts/onboard-agent.sh research
+./node_modules/openclaw-agent-wake-protocol/scripts/onboard-agent.sh finance
+./node_modules/openclaw-agent-wake-protocol/scripts/onboard-agent.sh platform
+./node_modules/openclaw-agent-wake-protocol/scripts/onboard-agent.sh research
 ```
 
 This handles: register → initialize LIFE core → detect Genesis status → print interview instructions if needed.
@@ -169,7 +169,7 @@ If an agent has not completed Genesis, it will receive interview instructions in
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `agentIdMap` | `Record<string, string>` | `{ "main": "quin-ea-v1" }` | Maps OpenClaw agent names to LIFE agent IDs |
+| `agentIdMap` | `Record<string, string>` | ``{}` (use agentIdSuffix convention)` | Maps OpenClaw agent names to LIFE agent IDs |
 | `sessionPrefix` | `string` | `"agent:"` | Only inject for sessions with this key prefix |
 | `commandTimeoutMs` | `number` | `20000` | Per-command timeout in milliseconds |
 
