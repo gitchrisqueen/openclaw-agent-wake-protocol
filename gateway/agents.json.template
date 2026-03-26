@@ -1,0 +1,18 @@
+{
+  "agents": {
+    "YOUR-AGENT-ID-v1": {
+      "name": "Your Agent Name",
+      "life_root": "/absolute/path/to/agent/LIFE",
+      "enabled_modules": [
+        "drives",
+        "heart",
+        "semantic",
+        "working",
+        "journal",
+        "state",
+        "history"
+      ],
+      "voice_enabled": false
+    }
+  }
+}

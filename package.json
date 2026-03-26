@@ -1,0 +1,48 @@
+{
+  "name": "openclaw-quin-wake-protocol",
+  "version": "1.0.0",
+  "description": "OpenClaw extension that manages the full LIFE gateway lifecycle for all agents — registration, Genesis interview, and wake protocol. Includes the multi-agent LIFE gateway wrapper server.",
+  "type": "module",
+  "main": "index.ts",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "life-gateway",
+    "life",
+    "wake-protocol",
+    "genesis",
+    "agent-persistence",
+    "mcp"
+  ],
+  "author": "Christopher Queen <gitchrisqueen>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gitchrisqueen/openclaw-quin-wake-protocol.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gitchrisqueen/openclaw-quin-wake-protocol/issues"
+  },
+  "homepage": "https://github.com/gitchrisqueen/openclaw-quin-wake-protocol#readme",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "openclaw.plugin.json",
+    "gateway/",
+    "scripts/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "openclaw": ">=0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
