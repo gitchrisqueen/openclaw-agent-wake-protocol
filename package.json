@@ -1,6 +1,6 @@
 {
   "name": "openclaw-agent-wake-protocol",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "OpenClaw extension: general-purpose LIFE gateway lifecycle manager for multi-agent systems. Handles agent registration, Genesis interview, and wake protocol for any agent configuration.",
   "type": "module",
   "main": "index.ts",

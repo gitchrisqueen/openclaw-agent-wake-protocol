@@ -1,5 +1,5 @@
 {
-  "id": "agent-wake-protocol",
+  "id": "openclaw-agent-wake-protocol",
   "name": "Agent Wake Protocol",
   "description": "General-purpose LIFE gateway lifecycle manager for OpenClaw multi-agent systems. Handles agent registration, Genesis interview, and wake protocol for any agent configuration.",
   "configSchema": {

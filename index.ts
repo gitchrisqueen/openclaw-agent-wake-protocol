@@ -277,7 +277,7 @@ export default function (api: any) {
 
   // ── Service: discover and wake all agents at gateway startup ──────────────
   api.registerService({
-    id: "agent-wake-protocol",
+    id: "openclaw-agent-wake-protocol",
 
     async start() {
       api.logger.info(
