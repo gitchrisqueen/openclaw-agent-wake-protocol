@@ -30,7 +30,6 @@ import {
   parseDiscovery,
   extractAgentName,
   isNonInteractive,
-  isBootstrapTurn,
   resolveLifeId,
   formatContextBlock,
 } from "./src/lib.js";
@@ -286,9 +285,6 @@ export default function (api: any) {
     const result = wakeResults.get(lifeId);
     if (!result) return;
 
-    const prompt: string = event?.prompt ?? "";
-    const messages: unknown[] = event?.messages ?? [];
-
     // Genesis-required: always re-inject until the agent completes the interview
     if (result.status === "genesis_required") {
       api.logger.info(
@@ -297,17 +293,19 @@ export default function (api: any) {
       return { prependContext: formatContextBlock(result) };
     }
 
-    // For ok/degraded/failed: inject once per session, with TTL-based refresh
+    // For ok/degraded/failed: bootstrappedSessions is the SOLE gate.
+    // OpenClaw passes messages=[] on every hook call (each turn is stateless
+    // from the hook's perspective), so checking messages.length is unreliable.
+    // Inject once per session; re-inject only after TTL expires.
     const lastInjected = bootstrappedSessions.get(sessionKey) ?? 0;
-    const isExpired = Date.now() - lastInjected > BOOTSTRAP_TTL_MS;
-    const isFirstTurn = isBootstrapTurn(prompt, messages);
-
-    if (!isFirstTurn && !isExpired) return;
+    const needsBootstrap = Date.now() - lastInjected > BOOTSTRAP_TTL_MS;
+    if (!needsBootstrap) return;
 
     bootstrappedSessions.set(sessionKey, Date.now());
 
+    const isRefresh = lastInjected > 0;
     api.logger.info(
-      `[agent-wake] Injecting ${result.status} context for ${lifeId} (session: ${sessionKey}${isExpired && !isFirstTurn ? ", ttl-refresh" : ""})`
+      `[agent-wake] Injecting ${result.status} context for ${lifeId} (session: ${sessionKey}${isRefresh ? ", ttl-refresh" : ""})`
     );
 
     return { prependContext: formatContextBlock(result) };
