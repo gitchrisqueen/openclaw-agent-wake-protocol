@@ -35,7 +35,8 @@
     "openclaw.plugin.json",
     "gateway/",
     "scripts/",
-    "README.md"
+    "README.md",
+    "src/"
   ],
   "engines": {
     "node": ">=18"

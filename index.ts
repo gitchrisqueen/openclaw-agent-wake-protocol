@@ -23,37 +23,21 @@
 
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import {
+  type LifecycleStatus,
+  type AgentWakeResult,
+  type DiscoveredAgent,
+  parseDiscovery,
+  extractAgentName,
+  isNonInteractive,
+  isBootstrapTurn,
+  resolveLifeId,
+  formatContextBlock,
+} from "./src/lib.js";
 
 const execAsync = promisify(exec);
 
 // ── Types ──────────────────────────────────────────────────────────────────
-
-type LifecycleStatus =
-  | "ok"
-  | "degraded"
-  | "genesis_required"
-  | "not_registered"
-  | "failed";
-
-interface AgentWakeResult {
-  agentId: string;
-  status: LifecycleStatus;
-  /** Human-readable summary injected into context */
-  message: string;
-  /** Raw output from wake command (status=ok/degraded) */
-  wakeOutput?: string;
-  /** Instructions returned by run_genesis_interview (status=genesis_required) */
-  genesisInstructions?: string;
-  timestamp: string;
-}
-
-interface DiscoveredAgent {
-  agent_id: string;
-  registered: boolean;
-  genesis_completed: boolean;
-  workspace?: string;
-  name?: string;
-}
 
 interface PluginConfig {
   /**
@@ -96,97 +80,6 @@ async function mcporter(
   } catch (err: any) {
     return `ERROR: ${err?.message ?? String(err)}`.slice(0, 400);
   }
-}
-
-/**
- * Parse the output of `mcporter call life-gateway.discover_agents`.
- * FastMCP returns a JSON array; mcporter may wrap it in content blocks.
- */
-function parseDiscovery(raw: string): DiscoveredAgent[] {
-  // Try raw JSON array first
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
-  } catch {}
-  // Try extracting JSON array embedded in text
-  const match = raw.match(/\[[\s\S]*\]/);
-  if (match) {
-    try {
-      return JSON.parse(match[0]);
-    } catch {}
-  }
-  return [];
-}
-
-function extractAgentName(sessionKey: string): string | null {
-  // sessionKey: "agent:{name}:{sessionId}" | "agent:{name}:cron:{id}"
-  const m = sessionKey.match(/^agent:([^:]+):/);
-  return m ? m[1] : null;
-}
-
-function isNonInteractive(trigger: string, sessionKey: string): boolean {
-  if (/^(cron|heartbeat|automation|schedule)$/i.test(trigger)) return true;
-  if (/:cron:|:heartbeat:|:subagent:/i.test(sessionKey)) return true;
-  return false;
-}
-
-function isBootstrapTurn(prompt: string, messages: unknown[]): boolean {
-  // The internal bootstrap-extra-files hook appends this phrase to the first message
-  if (prompt.includes("new session was started")) return true;
-  if (prompt.includes("Session Startup sequence")) return true;
-  return (messages?.length ?? 0) === 0;
-}
-
-function formatContextBlock(result: AgentWakeResult): string {
-  const tag = `wake-protocol-status`;
-
-  if (result.status === "not_registered") {
-    return [
-      `<${tag} agent="${result.agentId}" status="NOT_REGISTERED">`,
-      `Agent ${result.agentId} is not registered in the LIFE gateway.`,
-      ``,
-      `To register, call these tools in order:`,
-      `  1. life-gateway.register_agent   — agent_id=${result.agentId}, name=<your name>, workspace_dir=<path>`,
-      `  2. life-gateway.initialize_life_core — agent_id=${result.agentId}`,
-      `  3. Then run genesis (see run_genesis_interview tool)`,
-      `</${tag}>`,
-    ].join("\n");
-  }
-
-  if (result.status === "genesis_required") {
-    return [
-      `<${tag} agent="${result.agentId}" status="GENESIS_REQUIRED">`,
-      `You have not completed your LIFE Genesis interview. This must happen before your first wake.`,
-      ``,
-      `The Genesis interview establishes your identity, values, and traits in the LIFE system.`,
-      `It is a one-time process — once complete, you will wake normally on every subsequent boot.`,
-      ``,
-      `=== How to complete Genesis ===`,
-      `1. Read your Genesis questions: CORE/genesis/questions.md in your workspace`,
-      `2. Save your answers to: CORE/genesis/answers.md`,
-      `3. Call tool: genesis_apply  (or: life-gateway.apply_genesis_answers agent_id=${result.agentId})`,
-      ``,
-      `=== Instructions from LIFE gateway ===`,
-      result.genesisInstructions ?? "(no instructions returned)",
-      `</${tag}>`,
-    ].join("\n");
-  }
-
-  if (result.status === "failed") {
-    return [
-      `<${tag} agent="${result.agentId}" status="FAILED" checked="${result.timestamp}">`,
-      `Wake protocol failed. Operating in degraded mode — proceed without LIFE context.`,
-      `Error: ${result.message}`,
-      `</${tag}>`,
-    ].join("\n");
-  }
-
-  // ok or degraded
-  return [
-    `<${tag} agent="${result.agentId}" status="${result.status.toUpperCase()}" checked="${result.timestamp}">`,
-    result.wakeOutput ?? result.message,
-    `</${tag}>`,
-  ].join("\n");
 }
 
 // ── Per-agent lifecycle handler ────────────────────────────────────────────
