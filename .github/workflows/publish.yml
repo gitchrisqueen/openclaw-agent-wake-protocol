@@ -31,9 +31,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    environment: npm-publish
     permissions:
-      id-token: write
       contents: read
 
     steps:
@@ -63,4 +61,6 @@ jobs:
 
       - name: Publish to npm
         if: steps.version_check.outputs.already_published == 'false'
-        run: npm publish --provenance --access public
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

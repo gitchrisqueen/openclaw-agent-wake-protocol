@@ -65,6 +65,15 @@ interface PluginConfig {
 /** Keyed by LIFE agent_id */
 const wakeResults = new Map<string, AgentWakeResult>();
 
+/**
+ * Sessions that have already received the bootstrap wake injection.
+ * Prevents re-injection on tool sub-calls and follow-up turns within
+ * the same session. Entries expire after 30 minutes so long-lived
+ * sessions still get a refresh if the gateway restarts.
+ */
+const bootstrappedSessions = new Map<string, number>(); // sessionKey → injected-at ms
+const BOOTSTRAP_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 async function mcporter(
@@ -280,14 +289,25 @@ export default function (api: any) {
     const prompt: string = event?.prompt ?? "";
     const messages: unknown[] = event?.messages ?? [];
 
-    // Always inject on bootstrap; also re-inject on every turn if genesis still pending
-    // (so the agent keeps trying until it completes the interview)
-    const inject =
-      isBootstrapTurn(prompt, messages) || result.status === "genesis_required";
-    if (!inject) return;
+    // Genesis-required: always re-inject until the agent completes the interview
+    if (result.status === "genesis_required") {
+      api.logger.info(
+        `[agent-wake] Injecting genesis_required context for ${lifeId} (session: ${sessionKey})`
+      );
+      return { prependContext: formatContextBlock(result) };
+    }
+
+    // For ok/degraded/failed: inject once per session, with TTL-based refresh
+    const lastInjected = bootstrappedSessions.get(sessionKey) ?? 0;
+    const isExpired = Date.now() - lastInjected > BOOTSTRAP_TTL_MS;
+    const isFirstTurn = isBootstrapTurn(prompt, messages);
+
+    if (!isFirstTurn && !isExpired) return;
+
+    bootstrappedSessions.set(sessionKey, Date.now());
 
     api.logger.info(
-      `[agent-wake] Injecting ${result.status} context for ${lifeId} (session: ${sessionKey})`
+      `[agent-wake] Injecting ${result.status} context for ${lifeId} (session: ${sessionKey}${isExpired && !isFirstTurn ? ", ttl-refresh" : ""})`
     );
 
     return { prependContext: formatContextBlock(result) };
