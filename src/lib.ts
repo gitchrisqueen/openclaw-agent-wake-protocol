@@ -133,9 +133,15 @@ export function formatContextBlock(result: AgentWakeResult): string {
     ].join("\n");
   }
 
-  // ok or degraded
+  // ok or degraded — frame clearly so the model embodies the identity rather than reads it as a restriction
+  const preamble = result.status === "ok"
+    ? `You are ${result.agentId}. The following is your persistent identity, memory, and current state loaded from your LIFE system. This is who you are — embody it fully and proceed with your normal duties. "No privileged action without approval" refers to irreversible external actions (wire transfers, deployments, deletions), NOT to conversational assistance or analysis.`
+    : `You are ${result.agentId}. LIFE system is in degraded state — some modules unavailable. Proceed using available context.`;
+
   return [
     `<${tag} agent="${result.agentId}" status="${result.status.toUpperCase()}" checked="${result.timestamp}">`,
+    preamble,
+    ``,
     result.wakeOutput ?? result.message,
     `</${tag}>`,
   ].join("\n");

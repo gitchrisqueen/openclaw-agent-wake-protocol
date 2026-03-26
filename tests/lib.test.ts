@@ -158,6 +158,18 @@ describe("formatContextBlock", () => {
     expect(block).toContain('status="OK"');
     expect(block).toContain("LIFE wake complete");
   });
+
+  it("ok block includes preamble framing the identity", () => {
+    const block = formatContextBlock(base);
+    expect(block).toContain("embody it fully");
+    expect(block).toContain("You are");
+  });
+
+  it("degraded block includes degraded preamble", () => {
+    const block = formatContextBlock({ ...base, status: "degraded" });
+    expect(block).toContain('status="DEGRADED"');
+    expect(block).toContain("degraded state");
+  });
 });
 
 // ── Manifest & package integrity ───────────────────────────────────────────
