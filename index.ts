@@ -190,13 +190,49 @@ async function runAgentLifecycle(
       wakeRaw.toLowerCase().includes("degraded") ||
       wakeRaw.toLowerCase().includes("error"));
 
-  wakeResults.set(lifeAgentId, {
+  const wakeStatus: AgentWakeResult = {
     agentId: lifeAgentId,
     status: failed ? "failed" : degraded ? "degraded" : "ok",
     message: failed ? wakeRaw : `Wake complete for ${lifeAgentId}`,
     wakeOutput: wakeRaw,
     timestamp,
-  });
+  };
+
+  // For ok/degraded agents, run soul_coherence_check to populate coherence score
+  if (!failed) {
+    logger.info(`[agent-wake] ${lifeAgentId}: running soul coherence check`);
+    const coherenceRaw = await mcporter(
+      ["call", "life-gateway.soul_coherence_check", `agent_id=${lifeAgentId}`],
+      timeoutMs
+    );
+    if (!coherenceRaw.startsWith("ERROR")) {
+      try {
+        // FastMCP may wrap JSON in content blocks or return raw JSON
+        const rawText = coherenceRaw.replace(/^.*?"text"\s*:\s*"/, "").replace(/"\s*}.*$/, "").replace(/\\n/g, "\n").replace(/\\"/g, '"');
+        let parsed: any = null;
+        // Try direct parse first
+        try { parsed = JSON.parse(coherenceRaw); } catch {}
+        // Try extracting JSON object from text block
+        if (!parsed) {
+          const match = coherenceRaw.match(/\{[\s\S]*\}/);
+          if (match) { try { parsed = JSON.parse(match[0]); } catch {} }
+        }
+        if (parsed && typeof parsed.score === "number") {
+          wakeStatus.coherenceScore = parsed.score;
+          wakeStatus.coherenceGrade = parsed.grade;
+          wakeStatus.coherenceDimensions = parsed.dimensions;
+          wakeStatus.coherenceIssues = parsed.issues ?? [];
+          logger.info(
+            `[agent-wake] ${lifeAgentId}: soul coherence ${parsed.score}/100 (${parsed.grade})`
+          );
+        }
+      } catch (e: any) {
+        logger.warn(`[agent-wake] ${lifeAgentId}: coherence parse failed: ${e?.message}`);
+      }
+    }
+  }
+
+  wakeResults.set(lifeAgentId, wakeStatus);
 
   logger.info(
     `[agent-wake] ${lifeAgentId}: ${failed ? "FAILED" : degraded ? "DEGRADED" : "OK"}`
@@ -293,7 +329,16 @@ export default function (api: any) {
       return { prependContext: formatContextBlock(result) };
     }
 
-    // For ok/degraded/failed: bootstrappedSessions is the SOLE gate.
+    // DEGRADED: bypass TTL — re-inject on every turn so the agent stays aware
+    // of the degraded state and can self-correct (call wake_protocol_run).
+    if (result.status === "degraded") {
+      api.logger.info(
+        `[agent-wake] Injecting DEGRADED context for ${lifeId} (session: ${sessionKey}, bypassing TTL)`
+      );
+      return { prependContext: formatContextBlock(result) };
+    }
+
+    // For ok/failed: bootstrappedSessions is the SOLE gate.
     // OpenClaw passes messages=[] on every hook call (each turn is stateless
     // from the hook's perspective), so checking messages.length is unreliable.
     // Inject once per session; re-inject only after TTL expires.

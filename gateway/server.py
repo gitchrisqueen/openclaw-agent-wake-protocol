@@ -54,14 +54,20 @@ ALLOWED_MODULE_TOOLS = {
     "journal": {"write", "read"},
     "state": {"want", "horizon"},
     "history": {"recall", "discover"},
+    "patterns": {"learn", "recall", "forget"},
 }
 
+# Full wake sequence — restores drives, relationships, momentum, memory,
+# long-term arc, distilled lessons, active goals, and narrative continuity.
 WAKE_SEQUENCE = [
     ("drives", "start", {}),
     ("heart", "search", {}),
     ("working", "view", {}),
     ("semantic", "search", {}),
     ("history", "discover", {"section": "self"}),
+    ("patterns", "recall", {}),                  # distilled lessons learned
+    ("state", "want", {}),                        # active goals and horizons
+    ("journal", "read", {"limit": 3}),            # recent narrative continuity
 ]
 
 
@@ -683,7 +689,7 @@ def status(agent_id: str) -> str:
 
 @mcp.tool()
 def wake(agent_id: str) -> str:
-    """Run wake protocol for an agent_id (drives, heart, working, semantic, history)."""
+    """Run wake protocol for an agent_id (drives, heart, working, semantic, history, patterns, state, journal)."""
     agent_cfg = _get_agent_cfg(agent_id)
     resolved = agent_cfg.get("_resolved_agent_id", agent_id)
     out_parts = [f"Wake protocol for {agent_id} (resolved={resolved})"]
@@ -718,6 +724,178 @@ def call(
     _validate_access(agent_cfg, module, tool)
     content = _invoke_module(agent_cfg, module, tool, args or {})
     return _content_to_text(content)
+
+
+@mcp.tool()
+def soul_coherence_check(agent_id: str) -> Dict[str, Any]:
+    """
+    Validate soul coherence for an agent. Returns a composite score (0-100)
+    and per-dimension breakdown covering identity, genesis, patterns, memory,
+    and drive stability.
+    """
+    import sqlite3 as _sqlite3
+    from datetime import datetime as _dt, timezone as _tz
+
+    result: Dict[str, Any] = {
+        "agent_id": agent_id,
+        "timestamp": _dt.now(_tz.utc).isoformat(),
+        "score": 0,
+        "dimensions": {},
+        "issues": [],
+    }
+
+    # 1. Identity invariants — self.md and origin.md present and non-empty (25 pts)
+    identity_score = 0
+    try:
+        agent_cfg = _get_agent_cfg(agent_id)
+        life_root = agent_cfg.get("life_root") or ""
+        if life_root:
+            self_path = Path(life_root) / "DATA" / "history" / "self.md"
+            origin_path = Path(life_root) / "DATA" / "history" / "origin.md"
+            self_ok = self_path.exists() and self_path.stat().st_size > 50
+            origin_ok = origin_path.exists() and origin_path.stat().st_size > 20
+            if self_ok:
+                identity_score += 12
+            else:
+                result["issues"].append("self.md missing or empty")
+            if origin_ok:
+                identity_score += 13
+            else:
+                result["issues"].append("origin.md missing or empty")
+        else:
+            result["issues"].append("life_root not configured")
+        result["dimensions"]["identity_invariants"] = identity_score
+    except Exception as e:
+        result["issues"].append(f"identity check error: {e}")
+        result["dimensions"]["identity_invariants"] = 0
+
+    # 2. Genesis completeness (20 pts)
+    genesis_score = 0
+    try:
+        row = _db_get_agent(agent_id)
+        if row and row.get("genesis_completed"):
+            genesis_score = 20
+            # Bonus: check answers.md trait count from life_root
+            if life_root:
+                answers = Path(life_root) / "CORE" / "genesis" / "answers.md"
+                if answers.exists():
+                    text = answers.read_text(encoding="utf-8", errors="ignore")
+                    trait_count = len([line for line in text.splitlines() if "(" in line and ")" in line and line.strip().startswith(("Name:", "1 ", "2 ", "10 ") or line[0].isdigit())])
+                    result["dimensions"]["genesis_traits_detected"] = trait_count
+        else:
+            result["issues"].append("genesis not completed")
+        result["dimensions"]["genesis_complete"] = genesis_score
+    except Exception as e:
+        result["issues"].append(f"genesis check error: {e}")
+        result["dimensions"]["genesis_complete"] = 0
+
+    # 3. Patterns growth — distilled lessons stored (20 pts)
+    patterns_score = 0
+    try:
+        if life_root:
+            patterns_db = Path(life_root) / "DATA" / "patterns.db"
+            if patterns_db.exists():
+                conn = _sqlite3.connect(patterns_db)
+                count = conn.execute("SELECT COUNT(*) FROM patterns").fetchone()[0]
+                conn.close()
+                result["dimensions"]["patterns_count"] = count
+                if count >= 10:
+                    patterns_score = 20
+                elif count >= 5:
+                    patterns_score = 15
+                elif count >= 1:
+                    patterns_score = 8
+                else:
+                    result["issues"].append("no patterns stored yet — agent not learning from experience")
+            else:
+                result["issues"].append("patterns.db not found")
+        result["dimensions"]["patterns_growth"] = patterns_score
+    except Exception as e:
+        result["issues"].append(f"patterns check error: {e}")
+        result["dimensions"]["patterns_growth"] = 0
+
+    # 4. Memory freshness — recent semantic memories (20 pts)
+    memory_score = 0
+    try:
+        if life_root:
+            semantic_db = Path(life_root) / "DATA" / "semantic.db"
+            if semantic_db.exists():
+                conn = _sqlite3.connect(semantic_db)
+                tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+                memories_table = "memories" if "memories" in tables else (tables[0] if tables else None)
+                if memories_table:
+                    count = conn.execute(f"SELECT COUNT(*) FROM {memories_table}").fetchone()[0]
+                    # Try to get recently-added ones (last 7 days) if there's a timestamp column
+                    cols = [r[1] for r in conn.execute(f"PRAGMA table_info({memories_table})").fetchall()]
+                    recent = 0
+                    for ts_col in ("created_at", "timestamp", "updated_at", "last_accessed"):
+                        if ts_col in cols:
+                            try:
+                                recent = conn.execute(
+                                    f"SELECT COUNT(*) FROM {memories_table} WHERE {ts_col} >= datetime('now','-7 days')"
+                                ).fetchone()[0]
+                                break
+                            except Exception:
+                                pass
+                    conn.close()
+                    result["dimensions"]["semantic_total"] = count
+                    result["dimensions"]["semantic_recent_7d"] = recent
+                    if recent >= 5:
+                        memory_score = 20
+                    elif recent >= 1:
+                        memory_score = 12
+                    elif count >= 1:
+                        memory_score = 8  # has memories but nothing recent
+                    else:
+                        result["issues"].append("no semantic memories stored")
+                else:
+                    conn.close()
+                    result["issues"].append("semantic.db has no tables")
+            else:
+                result["issues"].append("semantic.db not found")
+        result["dimensions"]["memory_freshness"] = memory_score
+    except Exception as e:
+        result["issues"].append(f"memory check error: {e}")
+        result["dimensions"]["memory_freshness"] = 0
+
+    # 5. Drive stability — drives.db exists and has been written recently (20 pts)
+    drive_score = 0
+    try:
+        if life_root:
+            drives_db = Path(life_root) / "DATA" / "drives.db"
+            if drives_db.exists():
+                age_days = (time.time() - drives_db.stat().st_mtime) / 86400
+                result["dimensions"]["drives_db_age_days"] = round(age_days, 1)
+                if age_days <= 1:
+                    drive_score = 20
+                elif age_days <= 7:
+                    drive_score = 15
+                elif age_days <= 30:
+                    drive_score = 8
+                else:
+                    result["issues"].append("drives.db not updated in >30 days")
+            else:
+                result["issues"].append("drives.db not found")
+        result["dimensions"]["drive_stability"] = drive_score
+    except Exception as e:
+        result["issues"].append(f"drives check error: {e}")
+        result["dimensions"]["drive_stability"] = 0
+
+    total = (
+        result["dimensions"].get("identity_invariants", 0)
+        + result["dimensions"].get("genesis_complete", 0)
+        + result["dimensions"].get("patterns_growth", 0)
+        + result["dimensions"].get("memory_freshness", 0)
+        + result["dimensions"].get("drive_stability", 0)
+    )
+    result["score"] = total
+    result["grade"] = (
+        "EXCELLENT" if total >= 90
+        else "GOOD" if total >= 75
+        else "FAIR" if total >= 50
+        else "DEGRADED"
+    )
+    return result
 
 
 # ===== Entry point =====

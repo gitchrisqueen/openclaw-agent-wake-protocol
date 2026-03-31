@@ -1,0 +1,33 @@
+{
+  "_comment": "Snippet for openclaw.json — add the life-gateway server to openclaw-mcp-adapter. Replace YOUR_HOME, YOUR_VENV, and YOUR_WORKSPACE with your actual paths.",
+  "plugins": {
+    "entries": {
+      "openclaw-mcp-adapter": {
+        "config": {
+          "servers": [
+            {
+              "name": "life-gateway",
+              "type": "stdio",
+              "command": "YOUR_HOME/.openclaw/life/.venv/bin/python",
+              "args": [
+                "YOUR_HOME/.openclaw/life-gateway/server.py"
+              ],
+              "env": {
+                "LIFE_GATEWAY_REGISTRY": "YOUR_HOME/.openclaw/life-gateway/agents.json",
+                "LIFE_CALL_TIMEOUT_SEC": "45"
+              }
+            }
+          ]
+        }
+      },
+      "openclaw-agent-wake-protocol": {
+        "enabled": true,
+        "config": {
+          "agentIdMap": {
+            "main": "my-main-agent-v1"
+          }
+        }
+      }
+    }
+  }
+}
