@@ -773,14 +773,35 @@ def soul_coherence_check(agent_id: str) -> Dict[str, Any]:
     genesis_score = 0
     try:
         row = _db_get_agent(agent_id)
-        if row and row.get("genesis_completed"):
+        db_genesis_done = bool(row and row.get("genesis_completed"))
+        # Also detect genesis from answers.md presence (handles DB not updated yet)
+        answers_md_exists = False
+        if life_root:
+            answers_path = Path(life_root) / "CORE" / "genesis" / "answers.md"
+            if answers_path.exists() and answers_path.stat().st_size > 100:
+                answers_md_exists = True
+                # Backfill DB if needed
+                if not db_genesis_done:
+                    try:
+                        _conn = sqlite3.connect(LIFE_DB_PATH)
+                        _conn.execute(
+                            "UPDATE agents SET genesis_completed = 1, updated_at = CURRENT_TIMESTAMP WHERE agent_id = ?",
+                            (agent_id,)
+                        )
+                        _conn.commit()
+                        _conn.close()
+                        db_genesis_done = True
+                    except Exception:
+                        pass
+        if db_genesis_done or answers_md_exists:
             genesis_score = 20
-            # Bonus: check answers.md trait count from life_root
+            # Count trait answers as a bonus dimension
             if life_root:
                 answers = Path(life_root) / "CORE" / "genesis" / "answers.md"
                 if answers.exists():
                     text = answers.read_text(encoding="utf-8", errors="ignore")
-                    trait_count = len([line for line in text.splitlines() if "(" in line and ")" in line and line.strip().startswith(("Name:", "1 ", "2 ", "10 ") or line[0].isdigit())])
+                    trait_count = len([line for line in text.splitlines()
+                                       if line.strip() and line[0].isdigit() and "(" in line])
                     result["dimensions"]["genesis_traits_detected"] = trait_count
         else:
             result["issues"].append("genesis not completed")
