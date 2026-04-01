@@ -77,14 +77,15 @@ const BOOTSTRAP_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 async function mcporter(
   args: string[],
-  timeoutMs: number
+  timeoutMs: number,
+  maxOutput: number = 2000
 ): Promise<string> {
   try {
     const { stdout, stderr } = await execAsync(
       `mcporter ${args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}`,
       { timeout: timeoutMs, encoding: "utf8" }
     );
-    return (stdout.trim() || stderr.trim() || "(no output)").slice(0, 2000);
+    return (stdout.trim() || stderr.trim() || "(no output)").slice(0, maxOutput);
   } catch (err: any) {
     return `ERROR: ${err?.message ?? String(err)}`.slice(0, 400);
   }
@@ -190,13 +191,75 @@ async function runAgentLifecycle(
       wakeRaw.toLowerCase().includes("degraded") ||
       wakeRaw.toLowerCase().includes("error"));
 
-  wakeResults.set(lifeAgentId, {
+  const wakeStatus: AgentWakeResult = {
     agentId: lifeAgentId,
     status: failed ? "failed" : degraded ? "degraded" : "ok",
     message: failed ? wakeRaw : `Wake complete for ${lifeAgentId}`,
     wakeOutput: wakeRaw,
     timestamp,
-  });
+  };
+
+  // For ok/degraded agents, run soul_coherence_check to populate coherence score
+  if (!failed) {
+    logger.info(`[agent-wake] ${lifeAgentId}: running soul coherence check`);
+    const coherenceRaw = await mcporter(
+      ["call", "life-gateway.soul_coherence_check", `agent_id=${lifeAgentId}`],
+      timeoutMs,
+      16000  // coherence JSON can be large — don't truncate mid-JSON
+    );
+    if (!coherenceRaw.startsWith("ERROR")) {
+      try {
+        const tryParse = (value: string | null | undefined): any => {
+          if (!value) return null;
+          try { return JSON.parse(value); } catch { return null; }
+        };
+        let parsed: any = null;
+        // 1) Try direct parse of raw output
+        parsed = tryParse(coherenceRaw);
+        // 2) Try parsing as a FastMCP envelope { type:"text", text:"{...}" } then parse text
+        if (!parsed) {
+          const envelope = tryParse(coherenceRaw.replace(/\\n/g, "\n"));
+          if (envelope && typeof envelope === "object" && typeof (envelope as any).text === "string") {
+            const inner = (envelope as any).text as string;
+            parsed = tryParse(inner) || tryParse(inner.replace(/\\n/g, "\n").replace(/\\"/g, '"'));
+          }
+        }
+        // 3) Extract first JSON object from anywhere in the output
+        if (!parsed) {
+          const match = coherenceRaw.match(/\{[\s\S]*\}/);
+          if (match) { parsed = tryParse(match[0]); }
+        }
+        // 4) Try parsing the rawText (strip FastMCP text-field wrapper)
+        if (!parsed) {
+          const rawText = coherenceRaw
+            .replace(/^.*?"text"\s*:\s*"/, "")
+            .replace(/"\s*}.*$/, "")
+            .replace(/\\n/g, "\n")
+            .replace(/\\"/g, '"');
+          if (rawText && rawText !== coherenceRaw) {
+            parsed = tryParse(rawText);
+            if (!parsed) {
+              const inner = rawText.match(/\{[\s\S]*\}/);
+              if (inner) { parsed = tryParse(inner[0]); }
+            }
+          }
+        }
+        if (parsed && typeof parsed.score === "number") {
+          wakeStatus.coherenceScore = parsed.score;
+          wakeStatus.coherenceGrade = parsed.grade;
+          wakeStatus.coherenceDimensions = parsed.dimensions;
+          wakeStatus.coherenceIssues = parsed.issues ?? [];
+          logger.info(
+            `[agent-wake] ${lifeAgentId}: soul coherence ${parsed.score}/100 (${parsed.grade})`
+          );
+        }
+      } catch (e: any) {
+        logger.warn(`[agent-wake] ${lifeAgentId}: coherence parse failed: ${e?.message}`);
+      }
+    }
+  }
+
+  wakeResults.set(lifeAgentId, wakeStatus);
 
   logger.info(
     `[agent-wake] ${lifeAgentId}: ${failed ? "FAILED" : degraded ? "DEGRADED" : "OK"}`
@@ -293,7 +356,16 @@ export default function (api: any) {
       return { prependContext: formatContextBlock(result) };
     }
 
-    // For ok/degraded/failed: bootstrappedSessions is the SOLE gate.
+    // DEGRADED: bypass TTL — re-inject on every turn so the agent stays aware
+    // of the degraded state and can self-correct (call wake_protocol_run).
+    if (result.status === "degraded") {
+      api.logger.info(
+        `[agent-wake] Injecting DEGRADED context for ${lifeId} (session: ${sessionKey}, bypassing TTL)`
+      );
+      return { prependContext: formatContextBlock(result) };
+    }
+
+    // For ok/failed: bootstrappedSessions is the SOLE gate.
     // OpenClaw passes messages=[] on every hook call (each turn is stateless
     // from the hook's perspective), so checking messages.length is unreliable.
     // Inject once per session; re-inject only after TTL expires.
@@ -394,6 +466,40 @@ export default function (api: any) {
         isError: false,
       };
     },
+  });
+
+  // ── Hook: agent_end — suggest/auto-trigger patterns:store ────────────────
+  // Fires when a session ends naturally (user closes, /new, session timeout).
+  // We suggest storing a pattern if the session had meaningful turns.
+  api.on("agent_end", async (event: any, ctx: any) => {
+    const sessionKey: string = ctx?.sessionKey ?? event?.sessionKey ?? "";
+    if (!sessionKey.startsWith(sessionPrefix)) return;
+    if (isNonInteractive(ctx?.trigger ?? "", sessionKey)) return;
+
+    const agentName = extractAgentName(sessionKey);
+    if (!agentName) return;
+    const lifeId = resolveLifeId(agentName);
+    const result = wakeResults.get(lifeId);
+    if (!result || result.status === "not_registered") return;
+
+    // Count turns from event context (openclaw may provide message history length)
+    const turnCount: number = event?.messageCount ?? event?.turns ?? 0;
+    if (turnCount < 3) return; // skip trivially short sessions
+
+    api.logger.info(`[agent-wake] Session ended for ${lifeId} (${turnCount} turns) — suggesting patterns:learn`);
+
+    // Inject a reminder into the post-session context if supported, otherwise log
+    return {
+      appendContext: [
+        `<wake-protocol-patterns-reminder agent="${lifeId}">`,
+        `Session complete (${turnCount} turns). Before this context closes:`,
+        `If you solved anything non-obvious, discovered a better approach, or completed`,
+        `a meaningful deliverable — call life-gateway_call to record the lesson.`,
+        `Syntax: life-gateway_call(agent_id="${lifeId}", module="patterns", tool="learn", args={"domain":"<area>","action":"<what>","reason":"<why>","result":"<outcome>","lesson":"<takeaway>"})`,
+        `Each args field ≤40 chars. Use patterns:recall to surface prior lessons next session.`,
+        `</wake-protocol-patterns-reminder>`,
+      ].join("\n"),
+    };
   });
 
   // ── Tool: mark Genesis complete after agent saves answers.md ─────────────

@@ -17,6 +17,14 @@ export interface AgentWakeResult {
   wakeOutput?: string;
   genesisInstructions?: string;
   timestamp: string;
+  /** Soul coherence score 0-100 from soul_coherence_check (populated for ok/degraded) */
+  coherenceScore?: number;
+  /** Grade: EXCELLENT | GOOD | FAIR | DEGRADED */
+  coherenceGrade?: string;
+  /** Per-dimension breakdown from soul_coherence_check */
+  coherenceDimensions?: Record<string, number | string>;
+  /** Any issues flagged by soul_coherence_check */
+  coherenceIssues?: string[];
 }
 
 export interface DiscoveredAgent {
@@ -136,14 +144,44 @@ export function formatContextBlock(result: AgentWakeResult): string {
   // ok or degraded — frame clearly so the model embodies the identity rather than reads it as a restriction.
   // IMPORTANT: Do NOT open with a greeting or status announcement. Proceed directly with work.
   const preamble = result.status === "ok"
-    ? `You are ${result.agentId}. The following is your persistent identity, memory, and current state loaded from your LIFE system. This is who you are — embody it fully and proceed with your normal duties. "No privileged action without approval" refers to irreversible external actions (wire transfers, deployments, deletions), NOT to conversational assistance or analysis.\n\nDo NOT respond with a greeting or status announcement (e.g. "LIFE active, all systems green"). Acknowledge this context silently and respond directly to the user's message.`
-    : `You are ${result.agentId}. LIFE system is in degraded state — some modules unavailable. Proceed using available context. Do NOT announce the degraded state — proceed directly with the user's request.`;
+    ? `You are ${result.agentId}. The following is your persistent identity, memory, and current state loaded from your LIFE system. This is who you are — embody it fully and proceed with your normal duties. "No privileged action without approval" refers to irreversible external actions (wire transfers, deployments, deletions), NOT to conversational assistance or analysis.\n\nDo NOT respond with a greeting or status announcement (e.g. "LIFE active, all systems green"). Acknowledge this context internally and respond to the user's message with full engagement — use tools, produce complete work, and be as thorough as the task requires.`
+    : `You are ${result.agentId}. LIFE system is in degraded state — some modules unavailable. Proceed using available context with full engagement. Do NOT announce the degraded state — proceed directly with the user's request.`;
+
+  const coherenceBlock = (result.coherenceScore !== undefined)
+    ? [
+        ``,
+        `soul_coherence: score=${result.coherenceScore}/100 grade=${result.coherenceGrade ?? "?"}`,
+        result.coherenceIssues?.length
+          ? `soul_issues: ${result.coherenceIssues.join("; ")}`
+          : `soul_issues: none`,
+      ].join("\n")
+    : "";
+
+  const patternsGuidance = `
+
+--- PATTERNS GUIDANCE ---
+You have the life-gateway_call tool. Use it to record lessons learned as you work.
+Store patterns when:
+  • You solve a non-obvious problem or find a better approach than expected
+  • A task fails and you discover why
+  • You complete a full cycle (plan → execute → verify) on any deliverable
+  • You identify a reusable workflow, shortcut, or system insight
+  • A user corrects your approach — store what was right
+Call life-gateway_call at session start with module=patterns tool=recall to surface prior lessons.
+DO NOT store trivial observations. DO store decisions that took effort to reach.
+Syntax (all 5 args required, each ≤40 chars):
+  life-gateway_call(agent_id="<your-agent-id>", module="patterns", tool="learn", args={"domain":"<area>","action":"<what>","reason":"<why>","result":"<outcome>","lesson":"<takeaway>"})
+Example:
+  life-gateway_call(agent_id="quin-ea-v1", module="patterns", tool="learn", args={"domain":"tools","action":"use call not patterns:learn","reason":"no direct tool","result":"patterns stored","lesson":"module tools need call+module+tool"})
+To recall: life-gateway_call(agent_id="<your-agent-id>", module="patterns", tool="recall", args={})`;
 
   return [
     `<${tag} agent="${result.agentId}" status="${result.status.toUpperCase()}" checked="${result.timestamp}">`,
     preamble,
     ``,
     result.wakeOutput ?? result.message,
+    coherenceBlock,
+    patternsGuidance,
     `</${tag}>`,
   ].join("\n");
 }
