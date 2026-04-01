@@ -459,7 +459,7 @@ export default function (api: any) {
     const turnCount: number = event?.messageCount ?? event?.turns ?? 0;
     if (turnCount < 3) return; // skip trivially short sessions
 
-    api.logger.info(`[agent-wake] Session ended for ${lifeId} (${turnCount} turns) — suggesting patterns:store`);
+    api.logger.info(`[agent-wake] Session ended for ${lifeId} (${turnCount} turns) — suggesting patterns:learn`);
 
     // Inject a reminder into the post-session context if supported, otherwise log
     return {
@@ -467,8 +467,9 @@ export default function (api: any) {
         `<wake-protocol-patterns-reminder agent="${lifeId}">`,
         `Session complete (${turnCount} turns). Before this context closes:`,
         `If you solved anything non-obvious, discovered a better approach, or completed`,
-        `a meaningful deliverable — call patterns:store now to record the lesson.`,
-        `Syntax: patterns:store  content="<lesson>"  tags="<tag1>,<tag2>"  agent_id=${lifeId}`,
+        `a meaningful deliverable — call life-gateway_call to record the lesson.`,
+        `Syntax: life-gateway_call(agent_id="${lifeId}", module="patterns", tool="learn", args={"domain":"<area>","action":"<what>","reason":"<why>","result":"<outcome>","lesson":"<takeaway>"})`,
+        `Each args field ≤40 chars. Use patterns:recall to surface prior lessons next session.`,
         `</wake-protocol-patterns-reminder>`,
       ].join("\n"),
     };

@@ -160,16 +160,20 @@ export function formatContextBlock(result: AgentWakeResult): string {
   const patternsGuidance = `
 
 --- PATTERNS GUIDANCE ---
-You have a patterns:store tool. Use it to record lessons learned as you work.
-Call patterns:store when:
+You have the life-gateway_call tool. Use it to record lessons learned as you work.
+Store patterns when:
   • You solve a non-obvious problem or find a better approach than expected
   • A task fails and you discover why
   • You complete a full cycle (plan → execute → verify) on any deliverable
   • You identify a reusable workflow, shortcut, or system insight
   • A user corrects your approach — store what was right
-Call patterns:recall at session start (already in your wake sequence) to surface prior lessons.
+Call life-gateway_call at session start with module=patterns tool=recall to surface prior lessons.
 DO NOT store trivial observations. DO store decisions that took effort to reach.
-Syntax: patterns:store  content="<lesson>"  tags="<tag1>,<tag2>"  agent_id=${result.agentId}`;
+Syntax (all 5 args required, each ≤40 chars):
+  life-gateway_call(agent_id="<your-agent-id>", module="patterns", tool="learn", args={"domain":"<area>","action":"<what>","reason":"<why>","result":"<outcome>","lesson":"<takeaway>"})
+Example:
+  life-gateway_call(agent_id="quin-ea-v1", module="patterns", tool="learn", args={"domain":"tools","action":"use call not patterns:learn","reason":"no direct tool","result":"patterns stored","lesson":"module tools need call+module+tool"})
+To recall: life-gateway_call(agent_id="<your-agent-id>", module="patterns", tool="recall", args={})`;
 
   return [
     `<${tag} agent="${result.agentId}" status="${result.status.toUpperCase()}" checked="${result.timestamp}">`,
