@@ -157,12 +157,27 @@ export function formatContextBlock(result: AgentWakeResult): string {
       ].join("\n")
     : "";
 
+  const patternsGuidance = `
+
+--- PATTERNS GUIDANCE ---
+You have a patterns:store tool. Use it to record lessons learned as you work.
+Call patterns:store when:
+  • You solve a non-obvious problem or find a better approach than expected
+  • A task fails and you discover why
+  • You complete a full cycle (plan → execute → verify) on any deliverable
+  • You identify a reusable workflow, shortcut, or system insight
+  • A user corrects your approach — store what was right
+Call patterns:recall at session start (already in your wake sequence) to surface prior lessons.
+DO NOT store trivial observations. DO store decisions that took effort to reach.
+Syntax: patterns:store  content="<lesson>"  tags="<tag1>,<tag2>"  agent_id=${result.agentId}`;
+
   return [
     `<${tag} agent="${result.agentId}" status="${result.status.toUpperCase()}" checked="${result.timestamp}">`,
     preamble,
     ``,
     result.wakeOutput ?? result.message,
     coherenceBlock,
+    patternsGuidance,
     `</${tag}>`,
   ].join("\n");
 }

@@ -441,6 +441,39 @@ export default function (api: any) {
     },
   });
 
+  // ── Hook: agent_end — suggest/auto-trigger patterns:store ────────────────
+  // Fires when a session ends naturally (user closes, /new, session timeout).
+  // We suggest storing a pattern if the session had meaningful turns.
+  api.on("agent_end", async (event: any, ctx: any) => {
+    const sessionKey: string = ctx?.sessionKey ?? event?.sessionKey ?? "";
+    if (!sessionKey.startsWith(sessionPrefix)) return;
+    if (isNonInteractive(ctx?.trigger ?? "", sessionKey)) return;
+
+    const agentName = extractAgentName(sessionKey);
+    if (!agentName) return;
+    const lifeId = resolveLifeId(agentName);
+    const result = wakeResults.get(lifeId);
+    if (!result || result.status === "not_registered") return;
+
+    // Count turns from event context (openclaw may provide message history length)
+    const turnCount: number = event?.messageCount ?? event?.turns ?? 0;
+    if (turnCount < 3) return; // skip trivially short sessions
+
+    api.logger.info(`[agent-wake] Session ended for ${lifeId} (${turnCount} turns) — suggesting patterns:store`);
+
+    // Inject a reminder into the post-session context if supported, otherwise log
+    return {
+      appendContext: [
+        `<wake-protocol-patterns-reminder agent="${lifeId}">`,
+        `Session complete (${turnCount} turns). Before this context closes:`,
+        `If you solved anything non-obvious, discovered a better approach, or completed`,
+        `a meaningful deliverable — call patterns:store now to record the lesson.`,
+        `Syntax: patterns:store  content="<lesson>"  tags="<tag1>,<tag2>"  agent_id=${lifeId}`,
+        `</wake-protocol-patterns-reminder>`,
+      ].join("\n"),
+    };
+  });
+
   // ── Tool: mark Genesis complete after agent saves answers.md ─────────────
   api.registerTool({
     name: "genesis_apply",
