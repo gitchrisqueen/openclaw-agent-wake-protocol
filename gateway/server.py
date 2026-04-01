@@ -157,18 +157,26 @@ def _db_get_agent(agent_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _identity_agent_id(agent_dir: Path) -> str:
-    """Resolve canonical agent_id from IDENTITY.md (fallback: directory name)."""
+    """Resolve canonical agent_id from IDENTITY.md (fallback: directory name).
+    Always returns a versioned quin-*-v1 form to prevent short-name duplicates.
+    """
     identity_file = agent_dir / "IDENTITY.md"
+    candidate = agent_dir.name  # fallback
     if identity_file.exists():
         try:
             for line in identity_file.read_text(encoding="utf-8").splitlines():
                 if "**Agent ID:**" in line:
-                    candidate = line.split("**Agent ID:**", 1)[1].strip()
-                    if candidate:
-                        return candidate
+                    val = line.split("**Agent ID:**", 1)[1].strip()
+                    if val:
+                        candidate = val
+                        break
         except Exception:
             pass
-    return agent_dir.name
+    # Normalise: if it looks like a bare short name (no quin- prefix or no -v suffix),
+    # canonicalise to quin-{name}-v1 so auto-discovery never creates short-name aliases.
+    if candidate and not candidate.startswith("quin-") and not candidate.endswith("-v1"):
+        candidate = f"quin-{candidate}-v1"
+    return candidate
 
 
 # ===== Lifecycle tools (FastMCP) =====
