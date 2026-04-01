@@ -744,6 +744,8 @@ def soul_coherence_check(agent_id: str) -> Dict[str, Any]:
         "issues": [],
     }
 
+    life_root = ""  # initialise before try blocks so later sections never get UnboundLocalError
+
     # 1. Identity invariants — self.md and origin.md present and non-empty (25 pts)
     identity_score = 0
     try:
@@ -816,9 +818,8 @@ def soul_coherence_check(agent_id: str) -> Dict[str, Any]:
         if life_root:
             patterns_db = Path(life_root) / "DATA" / "patterns.db"
             if patterns_db.exists():
-                conn = _sqlite3.connect(patterns_db)
-                count = conn.execute("SELECT COUNT(*) FROM patterns").fetchone()[0]
-                conn.close()
+                with _sqlite3.connect(patterns_db) as conn:
+                    count = conn.execute("SELECT COUNT(*) FROM patterns").fetchone()[0]
                 result["dimensions"]["patterns_count"] = count
                 if count >= 10:
                     patterns_score = 20
@@ -841,37 +842,41 @@ def soul_coherence_check(agent_id: str) -> Dict[str, Any]:
         if life_root:
             semantic_db = Path(life_root) / "DATA" / "semantic.db"
             if semantic_db.exists():
-                conn = _sqlite3.connect(semantic_db)
-                tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
-                memories_table = "memories" if "memories" in tables else (tables[0] if tables else None)
-                if memories_table:
-                    count = conn.execute(f"SELECT COUNT(*) FROM {memories_table}").fetchone()[0]
-                    # Try to get recently-added ones (last 7 days) if there's a timestamp column
-                    cols = [r[1] for r in conn.execute(f"PRAGMA table_info({memories_table})").fetchall()]
-                    recent = 0
-                    for ts_col in ("created_at", "timestamp", "updated_at", "last_accessed"):
-                        if ts_col in cols:
-                            try:
-                                recent = conn.execute(
-                                    f"SELECT COUNT(*) FROM {memories_table} WHERE {ts_col} >= datetime('now','-7 days')"
-                                ).fetchone()[0]
-                                break
-                            except Exception:
-                                pass
-                    conn.close()
-                    result["dimensions"]["semantic_total"] = count
-                    result["dimensions"]["semantic_recent_7d"] = recent
-                    if recent >= 5:
-                        memory_score = 20
-                    elif recent >= 1:
-                        memory_score = 12
-                    elif count >= 1:
-                        memory_score = 8  # has memories but nothing recent
+                with _sqlite3.connect(semantic_db) as conn:
+                    all_tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+                    # Filter out internal SQLite tables before selecting
+                    user_tables = [t for t in all_tables if not t.startswith("sqlite_")]
+                    memories_table = "memories" if "memories" in user_tables else (user_tables[0] if user_tables else None)
+                    if memories_table:
+                        # Quote identifier to prevent SQL injection
+                        def _quote_ident(name: str) -> str:
+                            return '"' + name.replace('"', '""') + '"'
+                        qt = _quote_ident(memories_table)
+                        count = conn.execute(f"SELECT COUNT(*) FROM {qt}").fetchone()[0]
+                        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({qt})").fetchall()]
+                        recent = 0
+                        for ts_col in ("created_at", "timestamp", "updated_at", "last_accessed"):
+                            if ts_col in cols:
+                                try:
+                                    qtc = _quote_ident(ts_col)
+                                    recent = conn.execute(
+                                        f"SELECT COUNT(*) FROM {qt} WHERE {qtc} >= datetime('now','-7 days')"
+                                    ).fetchone()[0]
+                                    break
+                                except Exception:
+                                    pass
+                        result["dimensions"]["semantic_total"] = count
+                        result["dimensions"]["semantic_recent_7d"] = recent
+                        if recent >= 5:
+                            memory_score = 20
+                        elif recent >= 1:
+                            memory_score = 12
+                        elif count >= 1:
+                            memory_score = 8  # has memories but nothing recent
+                        else:
+                            result["issues"].append("no semantic memories stored")
                     else:
-                        result["issues"].append("no semantic memories stored")
-                else:
-                    conn.close()
-                    result["issues"].append("semantic.db has no tables")
+                        result["issues"].append("semantic.db has no tables")
             else:
                 result["issues"].append("semantic.db not found")
         result["dimensions"]["memory_freshness"] = memory_score
@@ -914,6 +919,7 @@ def soul_coherence_check(agent_id: str) -> Dict[str, Any]:
         "EXCELLENT" if total >= 90
         else "GOOD" if total >= 75
         else "FAIR" if total >= 50
+        else "POOR" if total >= 35
         else "DEGRADED"
     )
     return result

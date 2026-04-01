@@ -77,14 +77,15 @@ const BOOTSTRAP_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 async function mcporter(
   args: string[],
-  timeoutMs: number
+  timeoutMs: number,
+  maxOutput: number = 2000
 ): Promise<string> {
   try {
     const { stdout, stderr } = await execAsync(
       `mcporter ${args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}`,
       { timeout: timeoutMs, encoding: "utf8" }
     );
-    return (stdout.trim() || stderr.trim() || "(no output)").slice(0, 2000);
+    return (stdout.trim() || stderr.trim() || "(no output)").slice(0, maxOutput);
   } catch (err: any) {
     return `ERROR: ${err?.message ?? String(err)}`.slice(0, 400);
   }
@@ -203,19 +204,45 @@ async function runAgentLifecycle(
     logger.info(`[agent-wake] ${lifeAgentId}: running soul coherence check`);
     const coherenceRaw = await mcporter(
       ["call", "life-gateway.soul_coherence_check", `agent_id=${lifeAgentId}`],
-      timeoutMs
+      timeoutMs,
+      16000  // coherence JSON can be large — don't truncate mid-JSON
     );
     if (!coherenceRaw.startsWith("ERROR")) {
       try {
-        // FastMCP may wrap JSON in content blocks or return raw JSON
-        const rawText = coherenceRaw.replace(/^.*?"text"\s*:\s*"/, "").replace(/"\s*}.*$/, "").replace(/\\n/g, "\n").replace(/\\"/g, '"');
+        const tryParse = (value: string | null | undefined): any => {
+          if (!value) return null;
+          try { return JSON.parse(value); } catch { return null; }
+        };
         let parsed: any = null;
-        // Try direct parse first
-        try { parsed = JSON.parse(coherenceRaw); } catch {}
-        // Try extracting JSON object from text block
+        // 1) Try direct parse of raw output
+        parsed = tryParse(coherenceRaw);
+        // 2) Try parsing as a FastMCP envelope { type:"text", text:"{...}" } then parse text
+        if (!parsed) {
+          const envelope = tryParse(coherenceRaw.replace(/\\n/g, "\n"));
+          if (envelope && typeof envelope === "object" && typeof (envelope as any).text === "string") {
+            const inner = (envelope as any).text as string;
+            parsed = tryParse(inner) || tryParse(inner.replace(/\\n/g, "\n").replace(/\\"/g, '"'));
+          }
+        }
+        // 3) Extract first JSON object from anywhere in the output
         if (!parsed) {
           const match = coherenceRaw.match(/\{[\s\S]*\}/);
-          if (match) { try { parsed = JSON.parse(match[0]); } catch {} }
+          if (match) { parsed = tryParse(match[0]); }
+        }
+        // 4) Try parsing the rawText (strip FastMCP text-field wrapper)
+        if (!parsed) {
+          const rawText = coherenceRaw
+            .replace(/^.*?"text"\s*:\s*"/, "")
+            .replace(/"\s*}.*$/, "")
+            .replace(/\\n/g, "\n")
+            .replace(/\\"/g, '"');
+          if (rawText && rawText !== coherenceRaw) {
+            parsed = tryParse(rawText);
+            if (!parsed) {
+              const inner = rawText.match(/\{[\s\S]*\}/);
+              if (inner) { parsed = tryParse(inner[0]); }
+            }
+          }
         }
         if (parsed && typeof parsed.score === "number") {
           wakeStatus.coherenceScore = parsed.score;
